@@ -1,49 +1,43 @@
 const express = require('express');
-const { spawn } = require('child_process');
 const path = require('path');
+const { spawn } = require('child_process');
 const app = express();
-const port = 3000;
 
 app.use(express.json());
-app.use(express.static('public')); // Serves your index.html from the public folder
+
+// Serve static files from the 'public' folder
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Root Route: Explicitly sends index.html to fix "Cannot GET /"
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 let activeBots = [];
 
-// Route to Deploy a Bot
 app.post('/run-bot', (req, res) => {
     const pin = req.body.pin;
-    if (!pin) return res.status(400).send("No PIN provided.");
-
-    console.log(`[SYSTEM] Deploying bot to PIN: ${pin}`);
-
-    // Spawns a new independent Node process for the bot
-    const bot = spawn('node', ['bot.js', pin]);
-
-    activeBots.push({ process: bot, pin: pin });
-
-    bot.stdout.on('data', (data) => console.log(`[BOT-LOG]: ${data}`));
+    // Note: On Vercel, spawned processes may be killed quickly due to timeout
+    const botProcess = spawn('node', [path.join(__dirname, 'bot.js'), pin]);
+    activeBots.push(botProcess);
     
-    bot.on('exit', () => {
-        activeBots = activeBots.filter(b => b.process !== bot);
-        console.log(`[SYSTEM] Bot exited lobby ${pin}.`);
+    botProcess.on('exit', () => {
+        activeBots = activeBots.filter(p => p !== botProcess);
     });
 
-    res.send(`Bot deployed to ${pin}. Active sessions: ${activeBots.length}`);
+    res.send(`Attempting to deploy bot to PIN ${pin}...`);
 });
 
-// Route to Nuke All Sessions
 app.post('/kill-bots', (req, res) => {
     const count = activeBots.length;
-    activeBots.forEach(b => b.process.kill('SIGKILL'));
+    activeBots.forEach(proc => proc.kill('SIGKILL'));
     activeBots = [];
-    console.log(`[SYSTEM] Nuked ${count} sessions.`);
-    res.send(`Successfully nuked ${count} bot processes.`);
+    res.send(`Nuked ${count} active sessions.`);
 });
 
-app.listen(port, () => {
-    console.log(`----------------------------------------`);
-    console.log(`ISAACS BLOOKET LOWKV IS LIVE`);
-    console.log(`URL: http://localhost:${port}`);
-    console.log(`----------------------------------------`);
-});
-                     
+// Port handling for Local vs Vercel
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server live on port ${PORT}`));
+
+// REQUIRED FOR VERCEL
+module.exports = app;
